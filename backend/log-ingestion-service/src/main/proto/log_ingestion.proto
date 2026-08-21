@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.orderflow.loginestion.grpc";
+option java_outer_classname = "LogIngestionProto";
+
+service LogIngestionService {
+
+    rpc SendLog(LogRequest) returns (LogResponse);
+
+    rpc StreamLogs(stream LogRequest) returns (LogResponse);
+}
+
+message LogRequest {
+    string timestamp = 1;
+    string level = 2;
+    string service = 3;
+    string message = 4;
+}
+
+message LogResponse {
+    bool success = 1;
+    string message = 2;
+}
