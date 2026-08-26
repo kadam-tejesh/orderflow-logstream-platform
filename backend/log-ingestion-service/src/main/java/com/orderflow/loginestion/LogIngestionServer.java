@@ -4,6 +4,8 @@ import com.orderflow.loginestion.service.LogIngestionServiceImpl;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 
+import java.nio.file.Path;
+
 public class LogIngestionServer {
 
     private static final int PORT = 9090;
@@ -12,7 +14,11 @@ public class LogIngestionServer {
 
         Server server = ServerBuilder
                 .forPort(PORT)
-                .addService(new LogIngestionServiceImpl())
+                .addService(
+                        new LogIngestionServiceImpl(
+                                Path.of("data", "lucene-index")
+                        )
+                )
                 .build();
 
         server.start();
