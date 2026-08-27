@@ -4,11 +4,12 @@ import com.orderflow.loginestion.service.LogIngestionServiceImpl;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 
-import java.nio.file.Path;
-
 public class LogIngestionServer {
 
     private static final int PORT = 9090;
+
+    private static final String SEARCH_API_BASE_URL =
+            "http://localhost:8084";
 
     public static void main(String[] args) throws Exception {
 
@@ -16,7 +17,7 @@ public class LogIngestionServer {
                 .forPort(PORT)
                 .addService(
                         new LogIngestionServiceImpl(
-                                Path.of("data", "lucene-index")
+                                SEARCH_API_BASE_URL
                         )
                 )
                 .build();
@@ -28,9 +29,11 @@ public class LogIngestionServer {
         );
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+
             System.out.println(
                     "Shutting down Log Ingestion server..."
             );
+
             server.shutdown();
         }));
 
