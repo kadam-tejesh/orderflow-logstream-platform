@@ -10,9 +10,11 @@ public class LogIngestionServiceImpl
         extends LogIngestionServiceGrpc.LogIngestionServiceImplBase {
 
     private final LogForwardingClient forwardingClient;
+    private final LogParser logParser;
 
     public LogIngestionServiceImpl(String searchApiBaseUrl) {
         this.forwardingClient = new LogForwardingClient(searchApiBaseUrl);
+        this.logParser = new LogParser();
     }
 
     @Override
@@ -82,19 +84,26 @@ public class LogIngestionServiceImpl
 
     private void processLog(LogRequest request) throws Exception {
 
-        System.out.printf(
-                "[%s] [%s] [%s] %s%n",
+        LogParser.ParsedLog parsedLog = logParser.parse(
                 request.getTimestamp(),
                 request.getLevel(),
                 request.getService(),
                 request.getMessage()
         );
 
+        System.out.printf(
+                "[%s] [%s] [%s] %s%n",
+                parsedLog.getTimestamp(),
+                parsedLog.getLevel(),
+                parsedLog.getService(),
+                parsedLog.getMessage()
+        );
+
         forwardingClient.forwardLog(
-                request.getTimestamp(),
-                request.getLevel(),
-                request.getService(),
-                request.getMessage()
+                parsedLog.getTimestamp(),
+                parsedLog.getLevel(),
+                parsedLog.getService(),
+                parsedLog.getMessage()
         );
     }
 }
