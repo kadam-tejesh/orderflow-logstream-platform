@@ -1,21 +1,20 @@
 package com.orderflow.loginestion.service;
 
+import com.orderflow.loginestion.client.LogForwardingClient;
 import com.orderflow.loginestion.grpc.LogIngestionServiceGrpc;
 import com.orderflow.loginestion.grpc.LogRequest;
 import com.orderflow.loginestion.grpc.LogResponse;
-import com.orderflow.loginestion.index.LuceneLogIndexer;
 import io.grpc.stub.StreamObserver;
-
-import java.io.IOException;
-import java.nio.file.Path;
 
 public class LogIngestionServiceImpl
         extends LogIngestionServiceGrpc.LogIngestionServiceImplBase {
 
-    private final LuceneLogIndexer indexer;
+    private final LogForwardingClient forwardingClient;
+    private final LogParser logParser;
 
-    public LogIngestionServiceImpl(Path indexPath) throws IOException {
-        this.indexer = new LuceneLogIndexer(indexPath);
+    public LogIngestionServiceImpl(String searchApiBaseUrl) {
+        this.forwardingClient = new LogForwardingClient(searchApiBaseUrl);
+        this.logParser = new LogParser();
     }
 
     @Override
@@ -28,13 +27,13 @@ public class LogIngestionServiceImpl
 
             LogResponse response = LogResponse.newBuilder()
                     .setSuccess(true)
-                    .setMessage("Log received and indexed successfully")
+                    .setMessage("Log received and forwarded for indexing")
                     .build();
 
             responseObserver.onNext(response);
             responseObserver.onCompleted();
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             responseObserver.onError(e);
         }
     }
@@ -49,10 +48,12 @@ public class LogIngestionServiceImpl
 
             @Override
             public void onNext(LogRequest request) {
+
                 try {
                     processLog(request);
                     receivedLogs++;
-                } catch (IOException e) {
+
+                } catch (Exception e) {
                     responseObserver.onError(e);
                 }
             }
@@ -70,8 +71,8 @@ public class LogIngestionServiceImpl
                 LogResponse response = LogResponse.newBuilder()
                         .setSuccess(true)
                         .setMessage(
-                                receivedLogs +
-                                " logs received and indexed successfully"
+                                receivedLogs
+                                        + " logs received and forwarded for indexing"
                         )
                         .build();
 
@@ -81,21 +82,28 @@ public class LogIngestionServiceImpl
         };
     }
 
-    private void processLog(LogRequest request) throws IOException {
+    private void processLog(LogRequest request) throws Exception {
 
-        System.out.printf(
-                "[%s] [%s] [%s] %s%n",
+        LogParser.ParsedLog parsedLog = logParser.parse(
                 request.getTimestamp(),
                 request.getLevel(),
                 request.getService(),
                 request.getMessage()
         );
 
-        indexer.indexLog(
-                request.getTimestamp(),
-                request.getLevel(),
-                request.getService(),
-                request.getMessage()
+        System.out.printf(
+                "[%s] [%s] [%s] %s%n",
+                parsedLog.getTimestamp(),
+                parsedLog.getLevel(),
+                parsedLog.getService(),
+                parsedLog.getMessage()
+        );
+
+        forwardingClient.forwardLog(
+                parsedLog.getTimestamp(),
+                parsedLog.getLevel(),
+                parsedLog.getService(),
+                parsedLog.getMessage()
         );
     }
 }
