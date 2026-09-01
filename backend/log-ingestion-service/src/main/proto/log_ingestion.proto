@@ -16,6 +16,7 @@ message LogRequest {
     string level = 2;
     string service = 3;
     string message = 4;
+    int32 response_time = 5;
 }
 
 message LogResponse {

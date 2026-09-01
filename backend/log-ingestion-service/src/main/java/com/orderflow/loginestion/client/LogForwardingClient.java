@@ -27,18 +27,18 @@ public class LogForwardingClient {
             String timestamp,
             String level,
             String service,
-            String message) throws Exception {
+            String message,
+            int responseTime) throws Exception {
 
         long timestampMillis = parseTimestamp(timestamp);
 
-        // NOTE: LogRequest proto has no response_time field yet.
-        // Defaulting to 0 until the schema is extended.
         String json = String.format(
-                "{\"level\":\"%s\",\"service\":\"%s\",\"timestamp\":%d,\"message\":\"%s\",\"responseTime\":0}",
+                "{\"level\":\"%s\",\"service\":\"%s\",\"timestamp\":%d,\"message\":\"%s\",\"responseTime\":%d}",
                 escape(level),
                 escape(service),
                 timestampMillis,
-                escape(message)
+                escape(message),
+                responseTime
         );
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -64,30 +64,20 @@ public class LogForwardingClient {
     }
 
     private long parseTimestamp(String timestamp) {
-
         try {
-            // If the gRPC client already sends epoch millis as a string
             return Long.parseLong(timestamp);
-
         } catch (NumberFormatException e) {
-
-            // Fallback: use current time
             System.err.println(
-                    "Could not parse timestamp '"
-                            + timestamp
-                            + "', using current time instead"
+                    "Could not parse timestamp '" + timestamp + "', using current time instead"
             );
-
             return System.currentTimeMillis();
         }
     }
 
     private String escape(String value) {
-
         if (value == null) {
             return "";
         }
-
         return value
                 .replace("\\", "\\\\")
                 .replace("\"", "\\\"");

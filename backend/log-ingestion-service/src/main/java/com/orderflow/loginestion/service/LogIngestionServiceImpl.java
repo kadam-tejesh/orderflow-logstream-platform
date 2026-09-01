@@ -88,22 +88,25 @@ public class LogIngestionServiceImpl
                 request.getTimestamp(),
                 request.getLevel(),
                 request.getService(),
-                request.getMessage()
+                request.getMessage(),
+                request.getResponseTime()
         );
 
         System.out.printf(
-                "[%s] [%s] [%s] %s%n",
+                "[%s] [%s] [%s] %s (response_time=%dms)%n",
                 parsedLog.getTimestamp(),
                 parsedLog.getLevel(),
                 parsedLog.getService(),
-                parsedLog.getMessage()
+                parsedLog.getMessage(),
+                parsedLog.getResponseTime()
         );
 
         forwardingClient.forwardLog(
                 parsedLog.getTimestamp(),
                 parsedLog.getLevel(),
                 parsedLog.getService(),
-                parsedLog.getMessage()
+                parsedLog.getMessage(),
+                parsedLog.getResponseTime()
         );
     }
 }

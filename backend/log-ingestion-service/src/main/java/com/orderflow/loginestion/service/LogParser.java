@@ -6,13 +6,15 @@ public class LogParser {
             String timestamp,
             String level,
             String service,
-            String message) {
+            String message,
+            int responseTime) {
 
         return new ParsedLog(
                 normalize(timestamp),
                 normalize(level).toUpperCase(),
                 normalize(service),
-                normalize(message)
+                normalize(message),
+                responseTime
         );
     }
 
@@ -20,7 +22,6 @@ public class LogParser {
         if (value == null) {
             return "";
         }
-
         return value.trim();
     }
 
@@ -30,17 +31,20 @@ public class LogParser {
         private final String level;
         private final String service;
         private final String message;
+        private final int responseTime;
 
         public ParsedLog(
                 String timestamp,
                 String level,
                 String service,
-                String message) {
+                String message,
+                int responseTime) {
 
             this.timestamp = timestamp;
             this.level = level;
             this.service = service;
             this.message = message;
+            this.responseTime = responseTime;
         }
 
         public String getTimestamp() {
@@ -57,6 +61,10 @@ public class LogParser {
 
         public String getMessage() {
             return message;
+        }
+
+        public int getResponseTime() {
+            return responseTime;
         }
     }
 }

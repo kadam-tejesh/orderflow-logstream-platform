@@ -24,6 +24,7 @@ public class LogIngestionClient {
                     .setLevel("INFO")
                     .setService("order-service")
                     .setMessage("Test order log for Lucene indexing")
+                    .setResponseTime(250)
                     .build();
 
             LogResponse response = stub.sendLog(request);
