@@ -1,12 +1,16 @@
 package com.orderflow.alerting_engine_service.service;
 
 import com.orderflow.alerting_engine_service.client.SearchApiClient;
+import com.orderflow.alerting_engine_service.event.AlertEventProducer;
+import com.orderflow.alerting_engine_service.event.AlertFiredEvent;
 import com.orderflow.alerting_engine_service.model.AlertRule;
+import com.orderflow.alerting_engine_service.notification.WebhookNotifier;
 import com.orderflow.alerting_engine_service.repository.AlertRuleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -16,6 +20,8 @@ public class AlertEvaluationService {
 
     private final AlertRuleRepository alertRuleRepository;
     private final SearchApiClient searchApiClient;
+    private final WebhookNotifier webhookNotifier;
+    private final AlertEventProducer alertEventProducer;
 
     public void evaluateAllRules() {
         List<AlertRule> enabledRules = alertRuleRepository.findByEnabledTrue();
@@ -38,11 +44,29 @@ public class AlertEvaluationService {
                     rule.getThreshold(), breached ? "BREACHED" : "ok");
 
             if (breached) {
-                // Week 4: fire webhook/email + publish Kafka event here
+                handleBreach(rule, matchCount);
             }
         } catch (Exception ex) {
             log.error("Failed to evaluate rule '{}': {}", rule.getName(), ex.getMessage());
         }
+    }
+
+    private void handleBreach(AlertRule rule, long matchCount) {
+        AlertFiredEvent event = new AlertFiredEvent(
+                rule.getId(),
+                rule.getName(),
+                rule.getQuery(),
+                rule.getThreshold(),
+                matchCount,
+                rule.getTimeWindowMinutes(),
+                System.currentTimeMillis()
+        );
+
+        webhookNotifier.notify(event);
+        alertEventProducer.publishAlertFired(event);
+
+        rule.setLastTriggeredAt(LocalDateTime.now());
+        alertRuleRepository.save(rule);
     }
 
     private String buildWindowedQuery(AlertRule rule) {
