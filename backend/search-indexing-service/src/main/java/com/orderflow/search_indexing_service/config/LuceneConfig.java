@@ -38,10 +38,16 @@ public class LuceneConfig {
         return FSDirectory.open(Path.of(indexPath));
     }
 
+
     @Bean
     public IndexWriter indexWriter(Directory directory, Analyzer analyzer) throws Exception {
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
+
+        // Throughput tuning: larger RAM buffer before flushing to disk reduces
+        // I/O overhead under high-volume indexing.
+        config.setRAMBufferSizeMB(256.0);
+
         return new IndexWriter(directory, config);
     }
 }
