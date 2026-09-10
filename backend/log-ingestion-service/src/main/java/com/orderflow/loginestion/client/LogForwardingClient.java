@@ -105,13 +105,39 @@ public class LogForwardingClient {
         }
     }
 
+    /**
+     * Converts the incoming timestamp into Unix epoch milliseconds.
+     *
+     * Supported formats:
+     * 1. Numeric Unix timestamp in milliseconds
+     * 2. ISO-8601 LocalDateTime, for example:
+     *    2026-08-25T10:15:00
+     *
+     * If the timestamp cannot be parsed, the current system time is used.
+     */
     private long parseTimestamp(String timestamp) {
 
+        if (timestamp == null || timestamp.isBlank()) {
+            return System.currentTimeMillis();
+        }
+
+        // Try numeric Unix timestamp in milliseconds.
         try {
             return Long.parseLong(timestamp);
 
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException ignored) {
+            // Try ISO-8601 timestamp below.
+        }
 
+        // Try ISO-8601 LocalDateTime.
+        try {
+            return java.time.LocalDateTime
+                    .parse(timestamp)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli();
+
+        } catch (java.time.format.DateTimeParseException e) {
             System.err.println(
                     "Could not parse timestamp '"
                             + timestamp
@@ -122,6 +148,9 @@ public class LogForwardingClient {
         }
     }
 
+    /**
+     * Escapes values before inserting them into the JSON request body.
+     */
     private String escape(String value) {
 
         return Objects.toString(value, "")

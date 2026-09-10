@@ -8,3 +8,6 @@ data/
 # Frontend dependencies and build output
 frontend/node_modules/
 frontend/dist/
+
+# Search service runtime Lucene index
+backend/search-indexing-service/lucene-index-data/

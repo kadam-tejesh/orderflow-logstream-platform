@@ -108,6 +108,24 @@ class LogForwardingClientTest {
         );
     }
 
+    @Test
+    void shouldForwardLogWithIso8601Timestamp() throws Exception {
+
+        server = createServer(201, "Indexed successfully");
+
+        LogForwardingClient client =
+                new LogForwardingClient(baseUrl());
+
+        assertDoesNotThrow(() ->
+                client.forwardLog(
+                        "2026-08-25T10:15:00",
+                        "INFO",
+                        "order-service",
+                        "ISO timestamp test"
+                )
+        );
+    }
+
     private HttpServer createServer(
             int statusCode,
             String responseBody) throws IOException {
