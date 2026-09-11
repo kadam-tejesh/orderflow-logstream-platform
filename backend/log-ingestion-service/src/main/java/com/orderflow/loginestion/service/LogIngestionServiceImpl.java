@@ -4,6 +4,7 @@ import com.orderflow.loginestion.client.LogForwardingClient;
 import com.orderflow.loginestion.grpc.LogIngestionServiceGrpc;
 import com.orderflow.loginestion.grpc.LogRequest;
 import com.orderflow.loginestion.grpc.LogResponse;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 
 public class LogIngestionServiceImpl
@@ -34,7 +35,18 @@ public class LogIngestionServiceImpl
             responseObserver.onCompleted();
 
         } catch (Exception e) {
-            responseObserver.onError(e);
+
+            System.err.println("Failed to process log:");
+            e.printStackTrace();
+
+            responseObserver.onError(
+                    Status.INTERNAL
+                            .withDescription(
+                                    "Failed to process log: " + e.getMessage()
+                            )
+                            .withCause(e)
+                            .asRuntimeException()
+            );
         }
     }
 
@@ -45,28 +57,56 @@ public class LogIngestionServiceImpl
         return new StreamObserver<>() {
 
             private int receivedLogs = 0;
+            private boolean streamFailed = false;
 
             @Override
             public void onNext(LogRequest request) {
+
+                if (streamFailed) {
+                    return;
+                }
 
                 try {
                     processLog(request);
                     receivedLogs++;
 
                 } catch (Exception e) {
-                    responseObserver.onError(e);
+
+                    streamFailed = true;
+
+                    System.err.println("Failed to process streamed log:");
+                    e.printStackTrace();
+
+                    responseObserver.onError(
+                            Status.INTERNAL
+                                    .withDescription(
+                                            "Failed to process streamed log: "
+                                                    + e.getMessage()
+                                    )
+                                    .withCause(e)
+                                    .asRuntimeException()
+                    );
                 }
             }
 
             @Override
             public void onError(Throwable throwable) {
+
                 System.err.println(
                         "Log stream error: " + throwable.getMessage()
                 );
+
+                if (!streamFailed) {
+                    responseObserver.onError(throwable);
+                }
             }
 
             @Override
             public void onCompleted() {
+
+                if (streamFailed) {
+                    return;
+                }
 
                 LogResponse response = LogResponse.newBuilder()
                         .setSuccess(true)
