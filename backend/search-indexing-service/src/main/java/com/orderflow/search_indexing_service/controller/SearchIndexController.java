@@ -18,16 +18,19 @@ public class SearchIndexController {
     private final IndexingService indexingService;
     private final SearchService searchService;
 
-    // Stand-in ingestion endpoint until Rajasri's gRPC pipeline feeds this directly.
     @PostMapping("/index")
-    public ResponseEntity<Void> indexLog(@Valid @RequestBody LogEntryRequest logEntry) throws Exception {
+    public ResponseEntity<Void> indexLog(
+            @Valid @RequestBody LogEntryRequest logEntry) throws Exception {
+
         indexingService.indexLog(logEntry);
+
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
-    // e.g. GET /api/search?q=level:ERROR AND service:billing-api
     @GetMapping("/search")
-    public ResponseEntity<SearchResultResponse> search(@RequestParam("q") String query) throws Exception {
+    public ResponseEntity<SearchResultResponse> search(
+            @RequestParam("q") String query) throws Exception {
+
         return ResponseEntity.ok(searchService.search(query));
     }
 }
