@@ -7,10 +7,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 
 /**
- * Forwards parsed logs to the Search & Indexing Engine's /api/index endpoint.
+ * Forwards parsed logs to the Search & Indexing Engine.
  */
 public class LogForwardingClient {
 
@@ -36,27 +37,69 @@ public class LogForwardingClient {
                 .build();
     }
 
+    /**
+     * Forwards a single log to the Search API.
+     */
     public void forwardLog(
             String timestamp,
             String level,
             String service,
             String message) throws Exception {
 
-        long timestampMillis = parseTimestamp(timestamp);
-
-        String json = String.format(
-                "{\"level\":\"%s\",\"service\":\"%s\",\"timestamp\":%d,\"message\":\"%s\",\"responseTime\":0}",
-                escape(level),
-                escape(service),
-                timestampMillis,
-                escape(message)
+        ParsedLogData log = new ParsedLogData(
+                timestamp,
+                level,
+                service,
+                message
         );
+
+        sendRequest(
+                "/api/index",
+                buildSingleLogJson(log)
+        );
+    }
+
+    /**
+     * Forwards multiple logs in one HTTP request.
+     *
+     * This reduces HTTP request overhead and allows the search service
+     * to index and commit the entire batch together.
+     */
+    public void forwardLogs(List<ParsedLogData> logs) throws Exception {
+
+        if (logs == null || logs.isEmpty()) {
+            return;
+        }
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\"logs\":[");
+
+        for (int i = 0; i < logs.size(); i++) {
+
+            if (i > 0) {
+                json.append(",");
+            }
+
+            json.append(buildSingleLogJson(logs.get(i)));
+        }
+
+        json.append("]}");
+
+        sendRequest(
+                "/api/index/batch",
+                json.toString()
+        );
+    }
+
+    private void sendRequest(
+            String endpoint,
+            String json) throws Exception {
 
         HttpRequest request;
 
         try {
             request = HttpRequest.newBuilder()
-                    .uri(new URI(searchApiBaseUrl + "/api/index"))
+                    .uri(new URI(searchApiBaseUrl + endpoint))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
                     .timeout(REQUEST_TIMEOUT)
@@ -85,7 +128,11 @@ public class LogForwardingClient {
             }
 
             System.out.println(
-                    "Log successfully forwarded to Search API"
+                    "Successfully forwarded "
+                            + (endpoint.endsWith("/batch")
+                            ? "log batch"
+                            : "log")
+                            + " to Search API"
             );
 
         } catch (IOException e) {
@@ -105,13 +152,25 @@ public class LogForwardingClient {
         }
     }
 
+    private String buildSingleLogJson(ParsedLogData log) {
+
+        long timestampMillis = parseTimestamp(log.timestamp());
+
+        return String.format(
+                "{\"level\":\"%s\",\"service\":\"%s\",\"timestamp\":%d,\"message\":\"%s\",\"responseTime\":0}",
+                escape(log.level()),
+                escape(log.service()),
+                timestampMillis,
+                escape(log.message())
+        );
+    }
+
     /**
      * Converts the incoming timestamp into Unix epoch milliseconds.
      *
      * Supported formats:
      * 1. Numeric Unix timestamp in milliseconds
-     * 2. ISO-8601 LocalDateTime, for example:
-     *    2026-08-25T10:15:00
+     * 2. ISO-8601 LocalDateTime
      *
      * If the timestamp cannot be parsed, the current system time is used.
      */
@@ -121,7 +180,6 @@ public class LogForwardingClient {
             return System.currentTimeMillis();
         }
 
-        // Try numeric Unix timestamp in milliseconds.
         try {
             return Long.parseLong(timestamp);
 
@@ -129,7 +187,6 @@ public class LogForwardingClient {
             // Try ISO-8601 timestamp below.
         }
 
-        // Try ISO-8601 LocalDateTime.
         try {
             return java.time.LocalDateTime
                     .parse(timestamp)
@@ -138,6 +195,7 @@ public class LogForwardingClient {
                     .toEpochMilli();
 
         } catch (java.time.format.DateTimeParseException e) {
+
             System.err.println(
                     "Could not parse timestamp '"
                             + timestamp
@@ -156,5 +214,15 @@ public class LogForwardingClient {
         return Objects.toString(value, "")
                 .replace("\\", "\\\\")
                 .replace("\"", "\\\"");
+    }
+
+    /**
+     * Represents one parsed log ready for forwarding.
+     */
+    public record ParsedLogData(
+            String timestamp,
+            String level,
+            String service,
+            String message) {
     }
 }

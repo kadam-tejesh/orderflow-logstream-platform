@@ -13,6 +13,8 @@ import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 public class IndexingService {
@@ -23,20 +25,98 @@ public class IndexingService {
         Document document = new Document();
 
         // Exact-match keyword fields
-        document.add(new StringField(LogSchema.LEVEL, logEntry.getLevel(), Field.Store.YES));
-        document.add(new StringField(LogSchema.SERVICE, logEntry.getService(), Field.Store.YES));
+        document.add(new StringField(
+                LogSchema.LEVEL,
+                logEntry.getLevel(),
+                Field.Store.YES
+        ));
 
-        // Point fields for range queries, plus stored copies so we can read them back
-        document.add(new LongPoint(LogSchema.TIMESTAMP, logEntry.getTimestamp()));
-        document.add(new StoredField(LogSchema.TIMESTAMP, logEntry.getTimestamp()));
+        document.add(new StringField(
+                LogSchema.SERVICE,
+                logEntry.getService(),
+                Field.Store.YES
+        ));
 
-        document.add(new IntPoint(LogSchema.RESPONSE_TIME, logEntry.getResponseTime()));
-        document.add(new StoredField(LogSchema.RESPONSE_TIME, logEntry.getResponseTime()));
+        // Point fields for range queries, plus stored copies
+        document.add(new LongPoint(
+                LogSchema.TIMESTAMP,
+                logEntry.getTimestamp()
+        ));
+
+        document.add(new StoredField(
+                LogSchema.TIMESTAMP,
+                logEntry.getTimestamp()
+        ));
+
+        document.add(new IntPoint(
+                LogSchema.RESPONSE_TIME,
+                logEntry.getResponseTime()
+        ));
+
+        document.add(new StoredField(
+                LogSchema.RESPONSE_TIME,
+                logEntry.getResponseTime()
+        ));
 
         // Full-text field
-        document.add(new TextField(LogSchema.MESSAGE, logEntry.getMessage(), Field.Store.YES));
+        document.add(new TextField(
+                LogSchema.MESSAGE,
+                logEntry.getMessage(),
+                Field.Store.YES
+        ));
 
         indexWriter.addDocument(document);
         indexWriter.commit();
+    }
+
+    public void indexLogs(List<LogEntryRequest> logEntries) throws Exception {
+        for (LogEntryRequest logEntry : logEntries) {
+            Document document = new Document();
+
+            document.add(new StringField(
+                    LogSchema.LEVEL,
+                    logEntry.getLevel(),
+                    Field.Store.YES
+            ));
+
+            document.add(new StringField(
+                    LogSchema.SERVICE,
+                    logEntry.getService(),
+                    Field.Store.YES
+            ));
+
+            document.add(new LongPoint(
+                    LogSchema.TIMESTAMP,
+                    logEntry.getTimestamp()
+            ));
+
+            document.add(new StoredField(
+                    LogSchema.TIMESTAMP,
+                    logEntry.getTimestamp()
+            ));
+
+            document.add(new IntPoint(
+                    LogSchema.RESPONSE_TIME,
+                    logEntry.getResponseTime()
+            ));
+
+            document.add(new StoredField(
+                    LogSchema.RESPONSE_TIME,
+                    logEntry.getResponseTime()
+            ));
+
+            document.add(new TextField(
+                    LogSchema.MESSAGE,
+                    logEntry.getMessage(),
+                    Field.Store.YES
+            ));
+
+            indexWriter.addDocument(document);
+        }
+
+        // Commit once for the whole batch
+        if (!logEntries.isEmpty()) {
+            indexWriter.commit();
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.orderflow.search_indexing_service.controller;
 
+import com.orderflow.search_indexing_service.dto.BatchLogEntryRequest;
 import com.orderflow.search_indexing_service.dto.LogEntryRequest;
 import com.orderflow.search_indexing_service.dto.SearchResultResponse;
 import com.orderflow.search_indexing_service.service.IndexingService;
@@ -23,6 +24,15 @@ public class SearchIndexController {
             @Valid @RequestBody LogEntryRequest logEntry) throws Exception {
 
         indexingService.indexLog(logEntry);
+
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    @PostMapping("/index/batch")
+    public ResponseEntity<Void> indexLogs(
+            @Valid @RequestBody BatchLogEntryRequest batchRequest) throws Exception {
+
+        indexingService.indexLogs(batchRequest.getLogs());
 
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
