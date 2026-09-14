@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -218,6 +219,106 @@ class LogIngestionServiceImplTest {
         assertTrue(
                 requestBody.get().contains(
                         "\"message\":\"Order created successfully\""
+                )
+        );
+    }
+
+    @Test
+    void shouldForwardStreamLogsAsSingleBatchWhenBatchSizeIsReached()
+            throws Exception {
+
+        AtomicInteger batchRequestCount =
+                new AtomicInteger();
+
+        AtomicReference<String> requestBody =
+                new AtomicReference<>();
+
+        server = HttpServer.create(
+                new InetSocketAddress(0),
+                0
+        );
+
+        server.createContext(
+                "/api/index/batch",
+                exchange -> {
+
+                    batchRequestCount.incrementAndGet();
+
+                    String body = new String(
+                            exchange.getRequestBody().readAllBytes(),
+                            StandardCharsets.UTF_8
+                    );
+
+                    requestBody.set(body);
+
+                    byte[] response =
+                            "Batch indexed successfully"
+                                    .getBytes(StandardCharsets.UTF_8);
+
+                    exchange.sendResponseHeaders(
+                            201,
+                            response.length
+                    );
+
+                    exchange.getResponseBody().write(response);
+                    exchange.getResponseBody().close();
+                }
+        );
+
+        server.start();
+
+        LogIngestionServiceImpl service =
+                new LogIngestionServiceImpl(baseUrl());
+
+        TestResponseObserver observer =
+                new TestResponseObserver();
+
+        StreamObserver<LogRequest> requestObserver =
+                service.streamLogs(observer);
+
+        for (int i = 1; i <= 100; i++) {
+
+            requestObserver.onNext(
+                    createRequest(
+                            String.valueOf(1700000000000L + i),
+                            "info",
+                            "order-service",
+                            "Order created " + i
+                    )
+            );
+        }
+
+        requestObserver.onCompleted();
+
+        assertTrue(observer.completed);
+        assertNotNull(observer.response);
+        assertTrue(observer.response.getSuccess());
+
+        assertEquals(
+                "100 logs received and forwarded for indexing",
+                observer.response.getMessage()
+        );
+
+        assertEquals(
+                1,
+                batchRequestCount.get()
+        );
+
+        assertNotNull(requestBody.get());
+
+        assertTrue(
+                requestBody.get().startsWith("{\"logs\":[")
+        );
+
+        assertTrue(
+                requestBody.get().contains(
+                        "\"message\":\"Order created 1\""
+                )
+        );
+
+        assertTrue(
+                requestBody.get().contains(
+                        "\"message\":\"Order created 100\""
                 )
         );
     }

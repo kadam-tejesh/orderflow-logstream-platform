@@ -7,8 +7,13 @@ import com.orderflow.loginestion.grpc.LogResponse;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class LogIngestionServiceImpl
         extends LogIngestionServiceGrpc.LogIngestionServiceImplBase {
+
+    private static final int BATCH_SIZE = 100;
 
     private final LogForwardingClient forwardingClient;
     private final LogParser logParser;
@@ -56,6 +61,9 @@ public class LogIngestionServiceImpl
 
         return new StreamObserver<>() {
 
+            private final List<LogForwardingClient.ParsedLogData> batch =
+                    new ArrayList<>(BATCH_SIZE);
+
             private int receivedLogs = 0;
             private boolean streamFailed = false;
 
@@ -67,8 +75,15 @@ public class LogIngestionServiceImpl
                 }
 
                 try {
-                    processLog(request);
+                    LogForwardingClient.ParsedLogData parsedLog =
+                            parseLog(request);
+
+                    batch.add(parsedLog);
                     receivedLogs++;
+
+                    if (batch.size() >= BATCH_SIZE) {
+                        flushBatch();
+                    }
 
                 } catch (Exception e) {
 
@@ -108,21 +123,86 @@ public class LogIngestionServiceImpl
                     return;
                 }
 
-                LogResponse response = LogResponse.newBuilder()
-                        .setSuccess(true)
-                        .setMessage(
-                                receivedLogs
-                                        + " logs received and forwarded for indexing"
-                        )
-                        .build();
+                try {
+                    // Flush remaining logs when the stream ends.
+                    flushBatch();
 
-                responseObserver.onNext(response);
-                responseObserver.onCompleted();
+                    LogResponse response = LogResponse.newBuilder()
+                            .setSuccess(true)
+                            .setMessage(
+                                    receivedLogs
+                                            + " logs received and forwarded for indexing"
+                            )
+                            .build();
+
+                    responseObserver.onNext(response);
+                    responseObserver.onCompleted();
+
+                } catch (Exception e) {
+
+                    streamFailed = true;
+
+                    System.err.println(
+                            "Failed to flush final log batch:"
+                    );
+                    e.printStackTrace();
+
+                    responseObserver.onError(
+                            Status.INTERNAL
+                                    .withDescription(
+                                            "Failed to flush final log batch: "
+                                                    + e.getMessage()
+                                    )
+                                    .withCause(e)
+                                    .asRuntimeException()
+                    );
+                }
+            }
+
+            private void flushBatch() throws Exception {
+
+                if (batch.isEmpty()) {
+                    return;
+                }
+
+                forwardingClient.forwardLogs(
+                        new ArrayList<>(batch)
+                );
+
+                System.out.println(
+                        "Forwarded log batch of "
+                                + batch.size()
+                                + " logs to Search API"
+                );
+
+                batch.clear();
             }
         };
     }
 
     private void processLog(LogRequest request) throws Exception {
+
+        LogForwardingClient.ParsedLogData parsedLog =
+                parseLog(request);
+
+        System.out.printf(
+                "[%s] [%s] [%s] %s%n",
+                parsedLog.timestamp(),
+                parsedLog.level(),
+                parsedLog.service(),
+                parsedLog.message()
+        );
+
+        forwardingClient.forwardLog(
+                parsedLog.timestamp(),
+                parsedLog.level(),
+                parsedLog.service(),
+                parsedLog.message()
+        );
+    }
+
+    private LogForwardingClient.ParsedLogData parseLog(
+            LogRequest request) {
 
         LogParser.ParsedLog parsedLog = logParser.parse(
                 request.getTimestamp(),
@@ -139,7 +219,7 @@ public class LogIngestionServiceImpl
                 parsedLog.getMessage()
         );
 
-        forwardingClient.forwardLog(
+        return new LogForwardingClient.ParsedLogData(
                 parsedLog.getTimestamp(),
                 parsedLog.getLevel(),
                 parsedLog.getService(),
