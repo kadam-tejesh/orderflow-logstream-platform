@@ -17,10 +17,16 @@ public class LogIngestionServiceImpl
 
     private final LogForwardingClient forwardingClient;
     private final LogParser logParser;
+    private final IngestionMetrics metrics;
 
     public LogIngestionServiceImpl(String searchApiBaseUrl) {
         this.forwardingClient = new LogForwardingClient(searchApiBaseUrl);
         this.logParser = new LogParser();
+        this.metrics = new IngestionMetrics();
+    }
+
+    public IngestionMetrics getMetrics() {
+        return metrics;
     }
 
     @Override
@@ -28,8 +34,11 @@ public class LogIngestionServiceImpl
             LogRequest request,
             StreamObserver<LogResponse> responseObserver) {
 
+        metrics.recordReceived();
+
         try {
             processLog(request);
+            metrics.recordForwarded(1);
 
             LogResponse response = LogResponse.newBuilder()
                     .setSuccess(true)
@@ -40,6 +49,8 @@ public class LogIngestionServiceImpl
             responseObserver.onCompleted();
 
         } catch (Exception e) {
+
+            metrics.recordFailed();
 
             System.err.println("Failed to process log:");
             e.printStackTrace();
@@ -74,6 +85,8 @@ public class LogIngestionServiceImpl
                     return;
                 }
 
+                metrics.recordReceived();
+
                 try {
                     LogForwardingClient.ParsedLogData parsedLog =
                             parseLog(request);
@@ -88,6 +101,7 @@ public class LogIngestionServiceImpl
                 } catch (Exception e) {
 
                     streamFailed = true;
+                    metrics.recordFailed();
 
                     System.err.println("Failed to process streamed log:");
                     e.printStackTrace();
@@ -112,6 +126,7 @@ public class LogIngestionServiceImpl
                 );
 
                 if (!streamFailed) {
+                    metrics.recordFailed();
                     responseObserver.onError(throwable);
                 }
             }
@@ -124,7 +139,6 @@ public class LogIngestionServiceImpl
                 }
 
                 try {
-                    // Flush remaining logs when the stream ends.
                     flushBatch();
 
                     LogResponse response = LogResponse.newBuilder()
@@ -141,6 +155,7 @@ public class LogIngestionServiceImpl
                 } catch (Exception e) {
 
                     streamFailed = true;
+                    metrics.recordFailed();
 
                     System.err.println(
                             "Failed to flush final log batch:"
@@ -165,13 +180,18 @@ public class LogIngestionServiceImpl
                     return;
                 }
 
+                int batchSize = batch.size();
+
                 forwardingClient.forwardLogs(
                         new ArrayList<>(batch)
                 );
 
+                metrics.recordForwarded(batchSize);
+                metrics.recordBatchForwarded();
+
                 System.out.println(
                         "Forwarded log batch of "
-                                + batch.size()
+                                + batchSize
                                 + " logs to Search API"
                 );
 
@@ -184,14 +204,6 @@ public class LogIngestionServiceImpl
 
         LogForwardingClient.ParsedLogData parsedLog =
                 parseLog(request);
-
-        System.out.printf(
-                "[%s] [%s] [%s] %s%n",
-                parsedLog.timestamp(),
-                parsedLog.level(),
-                parsedLog.service(),
-                parsedLog.message()
-        );
 
         forwardingClient.forwardLog(
                 parsedLog.timestamp(),
