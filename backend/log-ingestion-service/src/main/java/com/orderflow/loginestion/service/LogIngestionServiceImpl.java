@@ -223,14 +223,6 @@ public class LogIngestionServiceImpl
                 request.getMessage()
         );
 
-        System.out.printf(
-                "[%s] [%s] [%s] %s%n",
-                parsedLog.getTimestamp(),
-                parsedLog.getLevel(),
-                parsedLog.getService(),
-                parsedLog.getMessage()
-        );
-
         return new LogForwardingClient.ParsedLogData(
                 parsedLog.getTimestamp(),
                 parsedLog.getLevel(),

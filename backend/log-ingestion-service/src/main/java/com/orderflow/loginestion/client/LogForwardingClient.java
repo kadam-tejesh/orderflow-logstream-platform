@@ -217,8 +217,7 @@ public class LogForwardingClient {
     }
 
     /**
-     * Represents one parsed log ready for forwarding.
-     */
+    /**`r`n     * Represents one parsed log ready for forwarding.`r`n     */
     public record ParsedLogData(
             String timestamp,
             String level,
