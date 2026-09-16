@@ -93,7 +93,7 @@ class LogForwardingClientTest {
     }
 
     @Test
-    void shouldThrowExceptionWhenSearchApiReturnsNon201() throws Exception {
+    void shouldRetryWhenSearchApiReturns500() throws Exception {
         server = createServer(500, "Internal server error");
 
         LogForwardingClient client =
@@ -110,7 +110,15 @@ class LogForwardingClientTest {
         );
 
         assertTrue(
-                exception.getMessage().contains("Search API returned status 500")
+                exception.getMessage().contains(
+                        "Search API failed after 3 retries with status 500"
+                ),
+                "Transient 500 errors should be retried before failing"
+        );
+
+        assertTrue(
+                exception.getMessage().contains("Internal server error"),
+                "Final exception should contain the Search API response body"
         );
     }
 

@@ -19,6 +19,10 @@ public class LogForwardingClient {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
     private static final int EXPECTED_SUCCESS_STATUS = 201;
 
+    private static final int MAX_RETRIES = 3;
+    private static final Duration INITIAL_RETRY_DELAY =
+            Duration.ofMillis(100);
+
     private final HttpClient httpClient;
     private final String searchApiBaseUrl;
 
@@ -91,6 +95,13 @@ public class LogForwardingClient {
         );
     }
 
+    /**
+     * Sends an HTTP request to the Search API.
+     *
+     * Connection failures and HTTP 5xx responses are treated as
+     * transient failures and retried with exponential backoff.
+     * HTTP 4xx responses are not retried.
+     */
     private void sendRequest(
             String endpoint,
             String json) throws Exception {
@@ -112,44 +123,131 @@ public class LogForwardingClient {
             );
         }
 
-        try {
-            HttpResponse<String> response = httpClient.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofString()
-            );
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 
-            if (response.statusCode() != EXPECTED_SUCCESS_STATUS) {
+            try {
+                HttpResponse<String> response = httpClient.send(
+                        request,
+                        HttpResponse.BodyHandlers.ofString()
+                );
+
+                int statusCode = response.statusCode();
+
+                if (statusCode == EXPECTED_SUCCESS_STATUS) {
+
+                    System.out.println(
+                            "Successfully forwarded "
+                                    + (endpoint.endsWith("/batch")
+                                    ? "log batch"
+                                    : "log")
+                                    + " to Search API"
+                    );
+
+                    return;
+                }
+
+                /*
+                 * Retry transient server-side failures.
+                 */
+                if (statusCode >= 500 && statusCode <= 599) {
+
+                    if (attempt < MAX_RETRIES) {
+
+                        waitBeforeRetry(attempt);
+
+                        System.err.println(
+                                "Search API returned "
+                                        + statusCode
+                                        + ". Retrying request ("
+                                        + (attempt + 1)
+                                        + "/"
+                                        + MAX_RETRIES
+                                        + ")"
+                        );
+
+                        continue;
+                    }
+
+                    throw new RuntimeException(
+                            "Search API failed after "
+                                    + MAX_RETRIES
+                                    + " retries with status "
+                                    + statusCode
+                                    + ": "
+                                    + response.body()
+                    );
+                }
+
+                /*
+                 * Client errors such as 400, 401, 403, and 404
+                 * should not be retried.
+                 */
                 throw new RuntimeException(
                         "Search API returned status "
-                                + response.statusCode()
+                                + statusCode
                                 + ": "
                                 + response.body()
                 );
+
+            } catch (IOException e) {
+
+                /*
+                 * Connection failures and request timeouts are
+                 * retried because they may be temporary.
+                 */
+                if (attempt < MAX_RETRIES) {
+
+                    waitBeforeRetry(attempt);
+
+                    System.err.println(
+                            "Search API connection failed. "
+                                    + "Retrying request ("
+                                    + (attempt + 1)
+                                    + "/"
+                                    + MAX_RETRIES
+                                    + "): "
+                                    + e.getMessage()
+                    );
+
+                    continue;
+                }
+
+                throw new RuntimeException(
+                        "Could not connect to Search API at "
+                                + searchApiBaseUrl
+                                + " after "
+                                + MAX_RETRIES
+                                + " retries",
+                        e
+                );
+
+            } catch (InterruptedException e) {
+
+                Thread.currentThread().interrupt();
+
+                throw new RuntimeException(
+                        "Log forwarding request was interrupted",
+                        e
+                );
             }
-
-            System.out.println(
-                    "Successfully forwarded "
-                            + (endpoint.endsWith("/batch")
-                            ? "log batch"
-                            : "log")
-                            + " to Search API"
-            );
-
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Could not connect to Search API at "
-                            + searchApiBaseUrl,
-                    e
-            );
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-
-            throw new RuntimeException(
-                    "Log forwarding request was interrupted",
-                    e
-            );
         }
+
+        throw new IllegalStateException(
+                "Unexpected retry state while forwarding log"
+        );
+    }
+
+    /**
+     * Waits before retrying using exponential backoff.
+     */
+    private void waitBeforeRetry(int attempt)
+            throws InterruptedException {
+
+        long delayMillis =
+                INITIAL_RETRY_DELAY.toMillis()
+                        * (1L << attempt);
+
+        Thread.sleep(delayMillis);
     }
 
     private String buildSingleLogJson(ParsedLogData log) {
@@ -217,7 +315,8 @@ public class LogForwardingClient {
     }
 
     /**
-    /**`r`n     * Represents one parsed log ready for forwarding.`r`n     */
+     * Represents one parsed log ready for forwarding.
+     */
     public record ParsedLogData(
             String timestamp,
             String level,
