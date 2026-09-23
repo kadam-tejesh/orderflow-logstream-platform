@@ -9,11 +9,24 @@ import io.grpc.stub.StreamObserver;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 public class LogIngestionServiceImpl
         extends LogIngestionServiceGrpc.LogIngestionServiceImplBase {
 
     private static final int BATCH_SIZE = 100;
+
+    /*
+     * Maximum number of parsed logs that can wait for forwarding.
+     *
+     * This provides a bounded buffer so memory usage does not grow
+     * without limit when log producers are faster than the
+     * Search & Indexing Service.
+     */
+    private static final int MAX_QUEUE_SIZE = 1000;
+
+    private static final long QUEUE_OFFER_TIMEOUT_SECONDS = 5;
 
     private final LogForwardingClient forwardingClient;
     private final LogParser logParser;
@@ -72,8 +85,13 @@ public class LogIngestionServiceImpl
 
         return new StreamObserver<>() {
 
-            private final List<LogForwardingClient.ParsedLogData> batch =
-                    new ArrayList<>(BATCH_SIZE);
+            /*
+             * Bounded queue prevents unlimited memory growth when
+             * incoming logs are faster than downstream forwarding.
+             */
+            private final ArrayBlockingQueue<
+                    LogForwardingClient.ParsedLogData> queue =
+                    new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
 
             private int receivedLogs = 0;
             private boolean streamFailed = false;
@@ -91,19 +109,59 @@ public class LogIngestionServiceImpl
                     LogForwardingClient.ParsedLogData parsedLog =
                             parseLog(request);
 
-                    batch.add(parsedLog);
+                    /*
+                     * Add the parsed log to the bounded queue.
+                     *
+                     * If the queue is full, wait for downstream
+                     * capacity instead of allowing unlimited memory
+                     * growth.
+                     */
+                    boolean accepted = queue.offer(
+                            parsedLog,
+                            QUEUE_OFFER_TIMEOUT_SECONDS,
+                            TimeUnit.SECONDS
+                    );
+
+                    if (!accepted) {
+                        throw new IllegalStateException(
+                                "Ingestion queue is full. "
+                                        + "Downstream Search API is too slow."
+                        );
+                    }
+
                     receivedLogs++;
 
-                    if (batch.size() >= BATCH_SIZE) {
+                    /*
+                     * Flush complete batches.
+                     */
+                    if (queue.size() >= BATCH_SIZE) {
                         flushBatch();
                     }
+
+                } catch (InterruptedException e) {
+
+                    Thread.currentThread().interrupt();
+
+                    streamFailed = true;
+                    metrics.recordFailed();
+
+                    responseObserver.onError(
+                            Status.CANCELLED
+                                    .withDescription(
+                                            "Log ingestion interrupted"
+                                    )
+                                    .withCause(e)
+                                    .asRuntimeException()
+                    );
 
                 } catch (Exception e) {
 
                     streamFailed = true;
                     metrics.recordFailed();
 
-                    System.err.println("Failed to process streamed log:");
+                    System.err.println(
+                            "Failed to process streamed log:"
+                    );
                     e.printStackTrace();
 
                     responseObserver.onError(
@@ -139,7 +197,12 @@ public class LogIngestionServiceImpl
                 }
 
                 try {
-                    flushBatch();
+                    /*
+                     * Flush any remaining logs smaller than BATCH_SIZE.
+                     */
+                    while (!queue.isEmpty()) {
+                        flushBatch();
+                    }
 
                     LogResponse response = LogResponse.newBuilder()
                             .setSuccess(true)
@@ -176,15 +239,22 @@ public class LogIngestionServiceImpl
 
             private void flushBatch() throws Exception {
 
+                if (queue.isEmpty()) {
+                    return;
+                }
+
+                List<LogForwardingClient.ParsedLogData> batch =
+                        new ArrayList<>(BATCH_SIZE);
+
+                queue.drainTo(batch, BATCH_SIZE);
+
                 if (batch.isEmpty()) {
                     return;
                 }
 
                 int batchSize = batch.size();
 
-                forwardingClient.forwardLogs(
-                        new ArrayList<>(batch)
-                );
+                forwardingClient.forwardLogs(batch);
 
                 metrics.recordForwarded(batchSize);
                 metrics.recordBatchForwarded();
@@ -194,8 +264,6 @@ public class LogIngestionServiceImpl
                                 + batchSize
                                 + " logs to Search API"
                 );
-
-                batch.clear();
             }
         };
     }

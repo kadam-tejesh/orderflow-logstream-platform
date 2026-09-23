@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -323,6 +324,120 @@ class LogIngestionServiceImplTest {
         );
     }
 
+    @Test
+    void shouldHandleSlowDownstreamWhileMaintainingBoundedBuffer()
+            throws Exception {
+
+        AtomicInteger batchRequestCount =
+                new AtomicInteger();
+
+        AtomicLong totalRequestTimeMillis =
+                new AtomicLong();
+
+        server = HttpServer.create(
+                new InetSocketAddress(0),
+                0
+        );
+
+        server.createContext(
+                "/api/index/batch",
+                exchange -> {
+
+                    long startTime =
+                            System.currentTimeMillis();
+
+                    batchRequestCount.incrementAndGet();
+
+                    /*
+                     * Simulate a slow downstream Search API.
+                     */
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(
+                                "Test server interrupted",
+                                e
+                        );
+                    }
+
+                    exchange.getRequestBody().readAllBytes();
+
+                    byte[] response =
+                            "Batch indexed successfully"
+                                    .getBytes(StandardCharsets.UTF_8);
+
+                    exchange.sendResponseHeaders(
+                            201,
+                            response.length
+                    );
+
+                    exchange.getResponseBody().write(response);
+                    exchange.getResponseBody().close();
+
+                    totalRequestTimeMillis.addAndGet(
+                            System.currentTimeMillis() - startTime
+                    );
+                }
+        );
+
+        server.start();
+
+        LogIngestionServiceImpl service =
+                new LogIngestionServiceImpl(baseUrl());
+
+        TestResponseObserver observer =
+                new TestResponseObserver();
+
+        StreamObserver<LogRequest> requestObserver =
+                service.streamLogs(observer);
+
+        /*
+         * Send multiple batches while the downstream service
+         * deliberately responds slowly.
+         */
+        for (int i = 1; i <= 250; i++) {
+
+            requestObserver.onNext(
+                    createRequest(
+                            String.valueOf(1700000000000L + i),
+                            "info",
+                            "order-service",
+                            "Order created " + i
+                    )
+            );
+        }
+
+        requestObserver.onCompleted();
+
+        assertTrue(observer.completed);
+        assertNotNull(observer.response);
+        assertTrue(observer.response.getSuccess());
+
+        assertEquals(
+                "250 logs received and forwarded for indexing",
+                observer.response.getMessage()
+        );
+
+        /*
+         * 250 logs should be forwarded as:
+         *
+         * 100 + 100 + 50
+         */
+        assertEquals(
+                3,
+                batchRequestCount.get()
+        );
+
+        /*
+         * The downstream delay must actually have been observed.
+         */
+        assertTrue(
+                totalRequestTimeMillis.get() >= 300,
+                "Expected slow downstream processing to be observed"
+        );
+    }
+
     private LogRequest createRequest(
             String timestamp,
             String level,
@@ -400,3 +515,4 @@ class LogIngestionServiceImplTest {
         }
     }
 }
+
