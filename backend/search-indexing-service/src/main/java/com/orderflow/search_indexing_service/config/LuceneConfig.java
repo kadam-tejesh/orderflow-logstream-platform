@@ -30,7 +30,11 @@ public class LuceneConfig {
         Map<String, Analyzer> fieldAnalyzers = new HashMap<>();
         fieldAnalyzers.put(LogSchema.LEVEL, new KeywordAnalyzer());
         fieldAnalyzers.put(LogSchema.SERVICE, new KeywordAnalyzer());
-        return new PerFieldAnalyzerWrapper(new StandardAnalyzer(), fieldAnalyzers);
+
+        return new PerFieldAnalyzerWrapper(
+                new StandardAnalyzer(),
+                fieldAnalyzers
+        );
     }
 
     @Bean
@@ -39,9 +43,25 @@ public class LuceneConfig {
     }
 
     @Bean
-    public IndexWriter indexWriter(Directory directory, Analyzer analyzer) throws Exception {
+    public IndexWriter indexWriter(
+            Directory directory,
+            Analyzer analyzer) throws Exception {
+
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
-        config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
+
+        config.setOpenMode(
+                IndexWriterConfig.OpenMode.CREATE_OR_APPEND
+        );
+
+        /*
+         * Allow Lucene to buffer more indexed documents in memory
+         * before flushing segments to disk.
+         *
+         * This reduces disk I/O pressure during high-throughput
+         * batch indexing while keeping the existing commit semantics.
+         */
+        config.setRAMBufferSizeMB(128.0);
+
         return new IndexWriter(directory, config);
     }
 }
