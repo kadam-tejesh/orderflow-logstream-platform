@@ -14,12 +14,17 @@ import org.apache.lucene.index.IndexWriter;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
 public class IndexingService {
 
     private final IndexWriter indexWriter;
+
+    private static final int COMMIT_INTERVAL = 1000;
+    private final AtomicInteger pendingDocuments = new AtomicInteger();
+    private final Object commitLock = new Object();
 
     public void indexLog(LogEntryRequest logEntry) throws Exception {
         Document document = new Document();
@@ -114,9 +119,18 @@ public class IndexingService {
             indexWriter.addDocument(document);
         }
 
-        // Commit once for the whole batch
+        // Commit periodically instead of after every batch
         if (!logEntries.isEmpty()) {
-            indexWriter.commit();
+            int pending = pendingDocuments.addAndGet(logEntries.size());
+
+            if (pending >= COMMIT_INTERVAL) {
+                synchronized (commitLock) {
+                    if (pendingDocuments.get() >= COMMIT_INTERVAL) {
+                        indexWriter.commit();
+                        pendingDocuments.addAndGet(-COMMIT_INTERVAL);
+                    }
+                }
+            }
         }
     }
 }
